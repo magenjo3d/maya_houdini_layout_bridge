@@ -172,9 +172,15 @@ def _instance_set_name(prefix):
 	return prefix + "_instances_export_set"
 
 
+def _is_valid_export_set_name(set_path):
+	"""Return whether a set path matches the predefined export-set naming convention."""
+	return set_path.rsplit("|", 1)[-1].endswith("_instances_export_set")
+
+
 def _instance_sets(cmds):
-	"""Return all bridge instance sets in the scene."""
-	return cmds.ls("*_instances_export_set", type="objectSet", long=True) or []
+	"""Return all predefined bridge export sets in the scene."""
+	set_paths = cmds.ls("*_instances_export_set", type="objectSet", long=True) or []
+	return sorted(set(set_paths))
 
 
 def _refresh_set_checkboxes(cmds, force_checked_sets=None):
@@ -241,24 +247,31 @@ def _refresh_set_checkboxes(cmds, force_checked_sets=None):
 
 
 def _checked_export_sets(cmds):
-	"""Return currently checked instance sets from the UI list."""
+	"""Return currently checked export sets from the UI list."""
 	if _QT_SET_CHECKBOXES:
 		target_sets = [
 			set_path for set_path, checkbox in _QT_SET_CHECKBOXES.items()
-			if checkbox is not None and checkbox.isChecked() and cmds.objExists(set_path)
+			if (
+				checkbox is not None
+				and checkbox.isChecked()
+				and cmds.objExists(set_path)
+				and _is_valid_export_set_name(set_path)
+			)
 		]
 		if not target_sets:
 			raise ValueError("Check at least one set in Export Sets before exporting.")
 		return target_sets
 
 	if not _SET_CHECKBOXES:
-		raise ValueError("No bridge instance sets found. Create instances before exporting.")
+		raise ValueError("No export sets found. Create a set ending with _instances_export_set before exporting.")
 
 	target_sets = []
 	for set_path, checkbox in _SET_CHECKBOXES.items():
 		if not cmds.control(checkbox, exists=True):
 			continue
 		if not cmds.objExists(set_path):
+			continue
+		if not _is_valid_export_set_name(set_path):
 			continue
 		if cmds.checkBox(checkbox, query=True, value=True):
 			target_sets.append(set_path)
@@ -365,14 +378,11 @@ def _create_instances(*_):
 
 
 def _set_member_transforms(cmds, member):
-	"""Return transform members for a set entry, including transform descendants."""
+	"""Return direct transform members for a set entry."""
 	transforms = set()
 	transform_nodes = cmds.ls(member, long=True, type="transform") or []
 	for transform in transform_nodes:
 		transforms.add(transform)
-		descendants = cmds.listRelatives(transform, allDescendents=True, type="transform", fullPath=True) or []
-		for descendant in descendants:
-			transforms.add(descendant)
 
 	if transforms:
 		return list(transforms)
@@ -386,7 +396,7 @@ def _set_member_transforms(cmds, member):
 
 
 def _tagged_instances(cmds, instance_sets):
-	"""Collect transforms under the provided sets, tagged or untagged."""
+	"""Collect transforms from the provided sets, preferring explicit bridge tags."""
 	tagged = []
 	seen = set()
 	for instance_set in instance_sets:
@@ -400,7 +410,7 @@ def _tagged_instances(cmds, instance_sets):
 				if cmds.attributeQuery(_ASSET_ID_ATTRIBUTE, node=transform, exists=True):
 					asset_id = cmds.getAttr(transform + "." + _ASSET_ID_ATTRIBUTE) or ""
 				if not asset_id:
-					asset_id = transform.rsplit("|", 1)[-1]
+					asset_id = transform.rsplit("|", 1)[-1].rsplit(":", 1)[-1]
 				seen.add(transform)
 				tagged.append((transform, asset_id))
 	return tagged
